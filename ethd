@@ -4449,7 +4449,11 @@ config() {
       OBOL_CLUSTER_PEER=$(whiptail --title "Obol cluster peer" --inputbox "Put your Obol cluster peer \
 (right-click to paste)" 10 60 "eth-docker" 3>&1 1>&2 2>&3)
     else
+# This gets used, but shellcheck doesn't recognize that
+# shellcheck disable=SC2034
       OBOL_CLUSTER_NAME=""
+# This gets used, but shellcheck doesn't recognize that
+# shellcheck disable=SC2034
       OBOL_CLUSTER_PEER=""
       echo "Obol Loki remote URL is empty, skipping"
     fi
