@@ -1,4 +1,3 @@
-version: "3.9"
 x-logging: &logging
   logging:
     driver: json-file
@@ -11,9 +10,12 @@ x-build: &prysm-build
   context: ./prysm
   dockerfile: ${PRYSM_DOCKERFILE}
   args:
-    - BUILD_TARGET=${PRYSM_SRC_BUILD_TARGET}
-    - DOCKER_TAG=${PRYSM_DOCKER_TAG}
-    - DOCKER_VC_TAG=${PRYSM_DOCKER_VC_TAG}
+    - BUILD_TARGET=${PRYSM_SRC_BUILD_TARGET:-'$(git describe --tags $(git rev-list --tags --max-count=1))'}
+    - SRC_REPO=${PRYSM_SRC_REPO:-https://github.com/offchainlabs/prysm}
+    - DOCKER_TAG=${PRYSM_DOCKER_TAG:-stable}
+    - DOCKER_VC_TAG=${PRYSM_DOCKER_VC_TAG:-stable}
+    - DOCKER_REPO=${PRYSM_DOCKER_REPO:-gcr.io/offchainlabs/prysm/beacon-chain}
+    - DOCKER_VC_REPO=${PRYSM_DOCKER_VC_REPO:-gcr.io/offchainlabs/prysm/validator}
 
 services:
   consensus:
@@ -22,26 +24,31 @@ services:
       target: consensus
       <<: *prysm-build
     image: prysm-consensus:local
+    pull_policy: never
     user: prysmconsensus
     stop_grace_period: 1m
     volumes:
-      - prysmbeacon-data:/var/lib/prysm
+      - prysmconsensus-data:/var/lib/prysm
       - /etc/localtime:/etc/localtime:ro
       - jwtsecret:/var/lib/prysm/ee-secret
     environment:
-      - RAPID_SYNC_URL=${RAPID_SYNC_URL}
+      - CHECKPOINT_SYNC_URL=${CHECKPOINT_SYNC_URL}
       - JWT_SECRET=${JWT_SECRET}
       - MEV_BOOST=${MEV_BOOST}
       - MEV_NODE=${MEV_NODE}
       - CL_EXTRAS=${CL_EXTRAS:-}
-      - ARCHIVE_NODE=${ARCHIVE_NODE:-}
+      - ARCHIVE_NODE=${CL_ARCHIVE_NODE:-}
+      - MINIMAL_NODE=${CL_MINIMAL_NODE:-}
+      - NETWORK=${NETWORK}
     ports:
-      - ${HOST_IP:-}${PRYSM_PORT}:${PRYSM_PORT}/tcp
-      - ${HOST_IP:-}${PRYSM_UDP_PORT}:${PRYSM_UDP_PORT}/udp
+      - ${HOST_IP:-}:${PRYSM_PORT}:${PRYSM_PORT}/tcp
+      - ${HOST_IP:-}:${PRYSM_UDP_PORT}:${PRYSM_UDP_PORT}/udp
+      - ${HOST_IP:-}:${CL_QUIC_PORT:-9001}:${CL_QUIC_PORT:-9001}/udp
     networks:
       default:
         aliases:
           - eth2
+          - ${CL_ALIAS:-default-consensus}  # This allows multiple Eth Docker stacks all connected to the same bridge network
     <<: *logging
     entrypoint:
       - docker-entrypoint.sh
@@ -50,10 +57,11 @@ services:
       - /var/lib/prysm/
       - --rpc-host
       - 0.0.0.0
-      - --grpc-gateway-host
+      - --http-host
       - 0.0.0.0
-      - --grpc-gateway-port
+      - --http-port
       - ${CL_REST_PORT:-5052}
+      - --http-cors-domain=*
       # Allow larger messages so credential change messages can be sent
       - --rpc-max-page-size
       - "200000"
@@ -67,11 +75,12 @@ services:
       - ${PRYSM_PORT}
       - --p2p-udp-port
       - ${PRYSM_UDP_PORT}
+      - --p2p-quic-port
+      - ${CL_QUIC_PORT}
       - --p2p-max-peers
-      - ${CL_MAX_PEER_COUNT:-45}
+      - ${CL_MAX_PEER_COUNT:-70}
       - --verbosity
       - ${LOG_LEVEL}
-      - --${NETWORK}
       - --accept-terms-of-use
       - --monitoring-host
       - 0.0.0.0
@@ -79,6 +88,12 @@ services:
       - "8008"
       - --suggested-fee-recipient
       - ${FEE_RECIPIENT}
+    labels:
+      - metrics.scrape=true
+      - metrics.path=/metrics
+      - metrics.port=8008
+      - metrics.instance=consensus
+      - metrics.network=${NETWORK}
 
   validator:
     restart: "unless-stopped"
@@ -86,6 +101,7 @@ services:
       target: validator
       <<: *prysm-build
     image: prysm-validator:local
+    pull_policy: never
     user: prysmvalidator
     volumes:
       - prysmvalidator-data:/var/lib/prysm
@@ -97,10 +113,13 @@ services:
       - GRAFFITI=${GRAFFITI:-}
       - DEFAULT_GRAFFITI=${DEFAULT_GRAFFITI:-false}
       - WEB3SIGNER=${WEB3SIGNER:-false}
+      - W3S_NODE=${W3S_NODE}
+      - NETWORK=${NETWORK}
+      - ENABLE_DIST_ATTESTATION_AGGR=${ENABLE_DIST_ATTESTATION_AGGR:-false}
     networks:
       default:
         aliases:
-          - vc
+          - ${VC_ALIAS:-vc}
     <<: *logging
     entrypoint:
       - docker-entrypoint-vc.sh
@@ -109,23 +128,24 @@ services:
       - /var/lib/prysm
       - --wallet-dir
       - /var/lib/prysm/
+      - --keymanager-token-file
+      - /var/lib/prysm/auth-token
       - --beacon-rpc-provider
       - consensus:4000
       - --verbosity
       - ${LOG_LEVEL}
-      - --${NETWORK}
       - --accept-terms-of-use
       - --monitoring-host
       - 0.0.0.0
       - --monitoring-port
       - "8009"
       - --web
-      - --grpc-gateway-host
+      - --http-host
       - 0.0.0.0
-      - --grpc-gateway-port
+      - --http-port
       - ${KEY_API_PORT:-7500}
-      - --grpc-gateway-corsdomain=*
-      - --beacon-rpc-gateway-provider
+      - --http-cors-domain=*
+      - --beacon-rest-api-provider
       - consensus:5052
       - --suggested-fee-recipient
       - ${FEE_RECIPIENT}
@@ -139,6 +159,11 @@ services:
       - traefik.http.routers.prysm.rule=Host(`${PRYSM_HOST}.${DOMAIN}`)
       - traefik.http.routers.prysm.tls.certresolver=letsencrypt
       - traefik.http.services.prysm.loadbalancer.server.port=${KEY_API_PORT:-7500}
+      - metrics.scrape=true
+      - metrics.path=/metrics
+      - metrics.port=8009
+      - metrics.instance=validator
+      - metrics.network=${NETWORK}
 
   create-wallet:
     profiles: ["tools"]
@@ -147,6 +172,7 @@ services:
       target: validator
       <<: *prysm-build
     image: prysm-validator:local
+    pull_policy: never
     user: prysmvalidator
     environment:
       - NETWORK=${NETWORK}
@@ -159,22 +185,14 @@ services:
   validator-exit:
     profiles: ["tools"]
     restart: "no"
-    build:
-      target: validator
-      <<: *prysm-build
-    image: prysm-validator:local
-    user: prysmvalidator
+    image: ${PRYSM_DOCKER_CTL_REPO}:${PRYSM_DOCKER_CTL_TAG}
     volumes:
       - prysmvalidator-data:/var/lib/prysm
       - /etc/localtime:/etc/localtime:ro
     entrypoint:
+      - /app/cmd/prysmctl/prysmctl
       - validator
-      - --verbosity
-      - ${LOG_LEVEL}
-      - --datadir
-      - /var/lib/prysm
-      - accounts
-      - voluntary-exit
+      - exit
       - --wallet-dir=/var/lib/prysm/
       - --beacon-rpc-provider=consensus:4000
       - --wallet-password-file=/var/lib/prysm/password.txt
@@ -189,6 +207,7 @@ services:
       target: validator
       <<: *prysm-build
     image: prysm-validator:local
+    pull_policy: never
     user: root
     volumes:
       - prysmvalidator-data:/var/lib/prysm
@@ -216,24 +235,32 @@ services:
     build:
       context: ./vc-utils
     image: vc-utils:local
+    pull_policy: never
     user: root
     volumes:
       - prysmvalidator-data:/var/lib/prysm
       - ./.eth/validator_keys:/validator_keys
+      - ./.eth/exit_messages:/exit_messages
       - /etc/localtime:/etc/localtime:ro
     environment:
       - KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD:-}
       - KEY_API_PORT=${KEY_API_PORT:-7500}
       - WEB3SIGNER=${WEB3SIGNER:-false}
-      - PRYSM="true"
+      - W3S_NODE=${W3S_NODE}
+      - CL_NODE=${CL_NODE}
+      - PRYSM=true
     depends_on:
       - validator
     entrypoint:
       - keymanager.sh
       - /var/lib/prysm/auth-token
-      - vc
+      - ${VC_ALIAS:-vc}
 
 volumes:
-  prysmbeacon-data:
+  prysmconsensus-data:
   prysmvalidator-data:
   jwtsecret:
+
+networks:
+  default:
+    enable_ipv6: ${IPV6:-false}

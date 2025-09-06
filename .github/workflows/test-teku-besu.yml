@@ -1,5 +1,8 @@
 name: Test Teku and Besu
-run-name: Test Teku and Besu
+
+defaults:
+  run:
+    shell: bash
 
 on:
   push:
@@ -16,40 +19,28 @@ jobs:
       github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v3
       - name: Create .env file
-        run: |
-          cp default.env .env
+        run: cp default.env .env
       - name: Set Teku/Besu
         run: |
           source ./.github/helper.sh
           COMPOSE_FILE=teku.yml:besu.yml
           var=COMPOSE_FILE
           set_value_in_env
-      - name: Start Teku/Besu
-        run: |
-          ./ethd up
-      - name: Test Teku
-        run: |
-          ./.github/check-service.sh consensus
-      - name: Test Besu
-        run: |
-          ./.github/check-service.sh execution
+          FEE_RECIPIENT=0xDccf8451070a86183eE70D330C4c43b686E9CF86
+          var=FEE_RECIPIENT
+          set_value_in_env
+      - name: Test the stack
+        uses: ./.github/actions/test_client_stack
       - name: Set Teku/Besu w/ VC
         run: |
           source ./.github/helper.sh
           COMPOSE_FILE=teku-cl-only.yml:teku-vc-only.yml:besu.yml
           var=COMPOSE_FILE
           set_value_in_env
-      - name: Start Teku/Besu
-        run: |
-          ./ethd up
-      - name: Test Teku CL
-        run: |
-          ./.github/check-service.sh consensus
-      - name: Test Teku VC
-        run: |
-          ./.github/check-service.sh validator
-      - name: Test Besu
-        run: |
-          ./.github/check-service.sh execution
+      - name: Test the stack
+        uses: ./.github/actions/test_client_stack

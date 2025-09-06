@@ -20,7 +20,7 @@ if [ ! -f /var/lib/teku/teku-keyapi.keystore ]; then
       echo '[req]'; \
       echo 'distinguished_name=req'; \
       echo '[san]'; \
-      echo 'subjectAltName=DNS:localhost,DNS:consensus,DNS:validator,IP:127.0.0.1')
+      echo 'subjectAltName=DNS:localhost,DNS:consensus,DNS:validator,DNS:vc,IP:127.0.0.1')
     openssl pkcs12 -export -in /var/lib/teku/teku-keyapi.crt -inkey /var/lib/teku/teku-keyapi.key -out /var/lib/teku/teku-keyapi.keystore -name teku-keyapi -passout pass:"$__password"
 fi
 
@@ -30,7 +30,7 @@ if [ -n "${JWT_SECRET}" ]; then
 fi
 
 if [[ -O "/var/lib/teku/ee-secret" ]]; then
-  # In case someone specificies JWT_SECRET but it's not a distributed setup
+  # In case someone specifies JWT_SECRET but it's not a distributed setup
   chmod 777 /var/lib/teku/ee-secret
 fi
 if [[ -O "/var/lib/teku/ee-secret/jwtsecret" ]]; then
@@ -38,16 +38,47 @@ if [[ -O "/var/lib/teku/ee-secret/jwtsecret" ]]; then
 fi
 
 # Check whether we should rapid sync
-if [ -n "${RAPID_SYNC_URL:+x}" ]; then
+if [ -n "${CHECKPOINT_SYNC_URL:+x}" ]; then
     if [ "${ARCHIVE_NODE}" = "true" ]; then
-        echo "Besu archive node cannot use checkpoint sync: Syncing from genesis."
-        __rapid_sync=""
+        echo "Teku archive node cannot use checkpoint sync: Syncing from genesis."
+        __checkpoint_sync="--ignore-weak-subjectivity-period-enabled=true"
+      if [ "${NETWORK}" = "hoodi" ]; then
+        __checkpoint_sync+=" --initial-state=https://checkpoint-sync.hoodi.ethpandaops.io/eth/v2/debug/beacon/states/genesis"
+      fi
     else
-        __rapid_sync="--initial-state=${RAPID_SYNC_URL}/eth/v2/debug/beacon/states/finalized"
+        __checkpoint_sync="--checkpoint-sync-url=${CHECKPOINT_SYNC_URL}"
         echo "Checkpoint sync enabled"
     fi
 else
-    __rapid_sync=""
+    __checkpoint_sync="--ignore-weak-subjectivity-period-enabled=true"
+    if [ "${NETWORK}" = "hoodi" ]; then
+      __checkpoint_sync+=" --initial-state=https://checkpoint-sync.hoodi.ethpandaops.io/eth/v2/debug/beacon/states/genesis"
+    fi
+fi
+
+if [[ "${NETWORK}" =~ ^https?:// ]]; then
+  echo "Custom testnet at ${NETWORK}"
+  repo=$(awk -F'/tree/' '{print $1}' <<< "${NETWORK}")
+  branch=$(awk -F'/tree/' '{print $2}' <<< "${NETWORK}" | cut -d'/' -f1)
+  config_dir=$(awk -F'/tree/' '{print $2}' <<< "${NETWORK}" | cut -d'/' -f2-)
+  echo "This appears to be the ${repo} repo, branch ${branch} and config directory ${config_dir}."
+  # For want of something more amazing, let's just fail if git fails to pull this
+  set -e
+  if [ ! -d "/var/lib/teku/testnet/${config_dir}" ]; then
+    mkdir -p /var/lib/teku/testnet
+    cd /var/lib/teku/testnet
+    git init --initial-branch="${branch}"
+    git remote add origin "${repo}"
+    git config core.sparseCheckout true
+    echo "${config_dir}" > .git/info/sparse-checkout
+    git pull origin "${branch}"
+  fi
+  bootnodes="$(awk -F'- ' '!/^#/ && NF>1 {print $2}' "/var/lib/teku/testnet/${config_dir}/bootstrap_nodes.yaml" | paste -sd ",")"
+  set +e
+  __checkpoint_sync="--initial-state=/var/lib/teku/testnet/${config_dir}/genesis.ssz --ignore-weak-subjectivity-period-enabled=true"
+  __network="--network=/var/lib/teku/testnet/${config_dir}/config.yaml --p2p-discovery-bootnodes=${bootnodes}"
+else
+  __network="--network=${NETWORK}"
 fi
 
 # Check whether we should use MEV Boost
@@ -75,7 +106,7 @@ else
 fi
 
 if [ "${ARCHIVE_NODE}" = "true" ]; then
-  echo "Besu archive node without pruning"
+  echo "Teku archive node without pruning"
   __prune="--data-storage-mode=ARCHIVE"
 else
   __prune="--data-storage-mode=MINIMAL"
@@ -83,17 +114,51 @@ fi
 
 # Web3signer URL
 if [[ "${EMBEDDED_VC}" = "true" && "${WEB3SIGNER}" = "true" ]]; then
-  __w3s_url="--validators-external-signer-url http://web3signer:9000"
+  __w3s_url="--validators-external-signer-url ${W3S_NODE}"
+#  while true; do
+#    if curl -s -m 5 ${W3S_NODE} &> /dev/null; then
+#        echo "web3signer is up, starting Teku"
+#        break
+#    else
+#        echo "Waiting for web3signer to be reachable..."
+#        sleep 5
+#    fi
+#  done
 else
   __w3s_url=""
+fi
+
+if [ "${IPV6}" = "true" ]; then
+  echo "Configuring Teku to listen on IPv6 ports"
+  __ipv6="--p2p-interface 0.0.0.0,:: --p2p-port-ipv6 ${CL_IPV6_P2P_PORT:-9090}"
+# ENR discovery on v6 is not yet working, likely too few peers. Manual for now
+  __ipv4_pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}$"
+  __ipv6_pattern="^[0-9A-Fa-f]{1,4}:" # Sufficient to check the start
+  set +e
+  __public_v4=$(curl -s -4 ifconfig.me)
+  __public_v6=$(curl -s -6 ifconfig.me)
+  set -e
+  __valid_v4=0
+  if [[ "$__public_v4" =~ $__ipv4_pattern ]]; then
+    __valid_v4=1
+  fi
+  if [[ "$__public_v6" =~ $__ipv6_pattern ]]; then
+    if [ "${__valid_v4}" -eq 1 ]; then
+      __ipv6+=" --p2p-advertised-ips ${__public_v4},${__public_v6}"
+    else
+      __ipv6+=" --p2p-advertised-ip ${__public_v6}"
+    fi
+  fi
+else
+  __ipv6=""
 fi
 
 if [ "${DEFAULT_GRAFFITI}" = "true" ]; then
 # Word splitting is desired for the command line parameters
 # shellcheck disable=SC2086
-  exec "$@" ${__w3s_url} ${__mev_boost} ${__rapid_sync} ${__prune} ${__beacon_stats} ${__doppel} ${CL_EXTRAS} ${VC_EXTRAS}
+  exec "$@" ${__network} ${__w3s_url} ${__mev_boost} ${__checkpoint_sync} ${__prune} ${__beacon_stats} ${__doppel} ${__ipv6} ${CL_EXTRAS} ${VC_EXTRAS}
 else
 # Word splitting is desired for the command line parameters
 # shellcheck disable=SC2086
-  exec "$@" "--validators-graffiti=${GRAFFITI}" ${__w3s_url} ${__mev_boost} ${__rapid_sync} ${__prune} ${__beacon_stats} ${__doppel} ${CL_EXTRAS} ${VC_EXTRAS}
+  exec "$@" ${__network} "--validators-graffiti=${GRAFFITI}" ${__w3s_url} ${__mev_boost} ${__checkpoint_sync} ${__prune} ${__beacon_stats} ${__doppel} ${__ipv6} ${CL_EXTRAS} ${VC_EXTRAS}
 fi

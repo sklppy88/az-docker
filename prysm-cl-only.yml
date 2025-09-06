@@ -1,4 +1,3 @@
-version: "3.9"
 x-logging: &logging
   logging:
     driver: json-file
@@ -11,9 +10,12 @@ x-build: &prysm-build
   context: ./prysm
   dockerfile: ${PRYSM_DOCKERFILE}
   args:
-    - BUILD_TARGET=${PRYSM_SRC_BUILD_TARGET}
-    - DOCKER_TAG=${PRYSM_DOCKER_TAG}
-    - DOCKER_VC_TAG=${PRYSM_DOCKER_VC_TAG}
+    - BUILD_TARGET=${PRYSM_SRC_BUILD_TARGET:-'$(git describe --tags $(git rev-list --tags --max-count=1))'}
+    - SRC_REPO=${PRYSM_SRC_REPO:-https://github.com/offchainlabs/prysm}
+    - DOCKER_TAG=${PRYSM_DOCKER_TAG:-stable}
+    - DOCKER_VC_TAG=${PRYSM_DOCKER_VC_TAG:-stable}
+    - DOCKER_REPO=${PRYSM_DOCKER_REPO:-gcr.io/offchainlabs/prysm/beacon-chain}
+    - DOCKER_VC_REPO=${PRYSM_DOCKER_VC_REPO:-gcr.io/offchainlabs/prysm/validator}
 
 services:
   consensus:
@@ -22,6 +24,7 @@ services:
       target: consensus
       <<: *prysm-build
     image: prysm-consensus:local
+    pull_policy: never
     user: prysmconsensus
     stop_grace_period: 1m
     volumes:
@@ -29,19 +32,23 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - jwtsecret:/var/lib/prysm/ee-secret
     environment:
-      - RAPID_SYNC_URL=${RAPID_SYNC_URL}
+      - CHECKPOINT_SYNC_URL=${CHECKPOINT_SYNC_URL}
       - JWT_SECRET=${JWT_SECRET}
       - MEV_BOOST=${MEV_BOOST}
       - MEV_NODE=${MEV_NODE}
       - CL_EXTRAS=${CL_EXTRAS:-}
-      - ARCHIVE_NODE=${ARCHIVE_NODE:-}
+      - ARCHIVE_NODE=${CL_ARCHIVE_NODE:-}
+      - MINIMAL_NODE=${CL_MINIMAL_NODE:-}
+      - NETWORK=${NETWORK}
     ports:
-      - ${HOST_IP:-}${PRYSM_PORT}:${PRYSM_PORT}/tcp
-      - ${HOST_IP:-}${PRYSM_UDP_PORT}:${PRYSM_UDP_PORT}/udp
+      - ${HOST_IP:-}:${PRYSM_PORT}:${PRYSM_PORT}/tcp
+      - ${HOST_IP:-}:${PRYSM_UDP_PORT}:${PRYSM_UDP_PORT}/udp
+      - ${HOST_IP:-}:${CL_QUIC_PORT:-9001}:${CL_QUIC_PORT:-9001}/udp
     networks:
       default:
         aliases:
           - eth2
+          - ${CL_ALIAS:-default-consensus}  # This allows multiple Eth Docker stacks all connected to the same bridge network
     <<: *logging
     entrypoint:
       - docker-entrypoint.sh
@@ -50,9 +57,9 @@ services:
       - /var/lib/prysm/
       - --rpc-host
       - 0.0.0.0
-      - --grpc-gateway-host
+      - --http-host
       - 0.0.0.0
-      - --grpc-gateway-port
+      - --http-port
       - ${CL_REST_PORT:-5052}
       # Allow larger messages so credential change messages can be sent
       - --rpc-max-page-size
@@ -67,11 +74,12 @@ services:
       - ${PRYSM_PORT}
       - --p2p-udp-port
       - ${PRYSM_UDP_PORT}
+      - --p2p-quic-port
+      - ${CL_QUIC_PORT}
       - --p2p-max-peers
-      - ${CL_MAX_PEER_COUNT:-45}
+      - ${CL_MAX_PEER_COUNT:-70}
       - --verbosity
       - ${LOG_LEVEL}
-      - --${NETWORK}
       - --accept-terms-of-use
       - --monitoring-host
       - 0.0.0.0
@@ -80,16 +88,16 @@ services:
       - --suggested-fee-recipient
       - ${FEE_RECIPIENT}
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.${CL_HOST:-cl}.entrypoints=websecure
-      - traefik.http.routers.${CL_HOST:-cl}.rule=Host(`${CL_HOST:-cl}.${DOMAIN}`)
-      - traefik.http.routers.${CL_HOST:-cl}.service=${CL_HOST:-cl}
-      - traefik.http.routers.${CL_HOST:-cl}.tls.certresolver=letsencrypt
-      - traefik.http.routers.${CL_HOST:-cl}lb.service=${CL_HOST:-cl}
-      - traefik.http.routers.${CL_HOST:-cl}lb.entrypoints=websecure
-      - traefik.http.routers.${CL_HOST:-cl}lb.rule=Host(`${CL_LB:-cl-lb}.${DOMAIN}`)
-      - traefik.http.routers.${CL_HOST:-cl}lb.tls.certresolver=letsencrypt
-      - traefik.http.services.${CL_HOST:-cl}.loadbalancer.server.port=${CL_REST_PORT:-5052}
+      - metrics.scrape=true
+      - metrics.path=/metrics
+      - metrics.port=8008
+      - metrics.instance=consensus
+      - metrics.network=${NETWORK}
+
 volumes:
   prysmconsensus-data:
   jwtsecret:
+
+networks:
+  default:
+    enable_ipv6: ${IPV6:-false}

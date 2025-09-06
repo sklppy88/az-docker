@@ -1,0 +1,39 @@
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: 100m
+      max-file: "3"
+      tag: '{{.ImageName}}|{{.Name}}|{{.ImageFullID}}|{{.FullID}}'
+
+services:
+  ssv-node:
+    restart: "unless-stopped"
+    image: ${SSV_NODE_REPO:-ssvlabs/ssv-node}:${SSV_NODE_TAG:-latest}
+    user: 12000:12000
+    volumes:
+      - ./ssv-config:/config
+      - ssv-data:/tmp
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - ${HOST_IP:-}:${SSV_P2P_PORT}:${SSV_P2P_PORT}/tcp
+      - ${HOST_IP:-}:${SSV_P2P_PORT_UDP}:${SSV_P2P_PORT_UDP}/udp
+    <<: *logging
+    environment:
+      - CONFIG_PATH=/config/config.yaml
+      - HOME=/tmp
+      - ENABLE_DOPPELGANGER_PROTECTION=${DOPPELGANGER:-false}
+    command: make BUILD_PATH=/go/bin/ssvnode start-node
+    labels:
+      - metrics.scrape=true
+      - metrics.path=/metrics
+      - metrics.port=15000
+      - metrics.instance=ssv-node
+      - metrics.network=${NETWORK}
+
+volumes:
+  ssv-data:
+
+networks:
+  default:
+    enable_ipv6: ${IPV6:-false}

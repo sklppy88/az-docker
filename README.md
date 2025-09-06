@@ -1,22 +1,22 @@
-# eth-docker: Docker automation for Ethereum nodes.
+# Eth Docker: Docker automation for Ethereum nodes.
 
 [![GitPOAP Badge](https://public-api.gitpoap.io/v1/repo/eth-educators/eth-docker/badge)](https://www.gitpoap.io/gh/eth-educators/eth-docker)
 
-eth-docker, a simple yet configurable way to run [Ethereum](https://ethereum.org/en/upgrades/) nodes.
+Eth Docker, a simple yet configurable way to run [Ethereum](https://ethereum.org/roadmap/) nodes.
 
 ## Getting Started
 
-Please see the [official documentation](https://eth-docker.net).
+Please see the [official documentation](https://ethdocker.com).
 
-For a quick testnet start, you can install prerequisites and configure eth-docker, as any user not named `root`:
+For a quick testnet start, you can install prerequisites and configure Eth Docker, as any user not named `root`:
 
-* `cd ~ && git clone https://github.com/eth-educators/eth-docker.git && cd eth-docker`
+* `cd ~ && git clone https://github.com/ethstaker/eth-docker.git && cd eth-docker`
 * `./ethd install`
 * `./ethd config`
 
 ## Support
 
-The #software channel in [ethstaker Discord](https://discord.io/ethstaker) is the place to ask questions about eth-docker.
+The #software channel in [ethstaker Discord](https://discord.gg/ethstaker) is the place to ask questions about Eth Docker.
 
 ## Contributions
 
@@ -29,4 +29,9 @@ please read the [contribution guidelines](CONTRIBUTING.md) so you can run lint c
 
 ## Version
 
-This is eth-docker v2.3.1
+Eth Docker uses a "semver-ish" scheme.
+- First digit, major shifts in how things work. The last one was the Ethereum merge. I do not expect another shift that
+large.
+- Second through fourth digit, [semver](https://semver.org/).
+
+This is Eth Docker v2.16.0.0

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 if [ "$(id -u)" = '0' ]; then
   chown -R erigon:erigon /var/lib/erigon
-  exec su-exec erigon "${BASH_SOURCE[0]}" "$@"
+  exec gosu erigon "${BASH_SOURCE[0]}" "$@"
 fi
 
 if [ -n "${JWT_SECRET}" ]; then
@@ -19,37 +19,98 @@ if [[ ! -f /var/lib/erigon/ee-secret/jwtsecret ]]; then
 fi
 
 if [[ -O "/var/lib/erigon/ee-secret" ]]; then
-  # In case someone specificies JWT_SECRET but it's not a distributed setup
+  # In case someone specifies JWT_SECRET but it's not a distributed setup
   chmod 777 /var/lib/erigon/ee-secret
 fi
 if [[ -O "/var/lib/erigon/ee-secret/jwtsecret" ]]; then
   chmod 666 /var/lib/erigon/ee-secret/jwtsecret
 fi
 
-# Check for network, and set prune accordingly
+if [[ "${NETWORK}" =~ ^https?:// ]]; then
+  echo "Custom testnet at ${NETWORK}"
+  repo=$(awk -F'/tree/' '{print $1}' <<< "${NETWORK}")
+  branch=$(awk -F'/tree/' '{print $2}' <<< "${NETWORK}" | cut -d'/' -f1)
+  config_dir=$(awk -F'/tree/' '{print $2}' <<< "${NETWORK}" | cut -d'/' -f2-)
+  echo "This appears to be the ${repo} repo, branch ${branch} and config directory ${config_dir}."
+  # For want of something more amazing, let's just fail if git fails to pull this
+  set -e
+  if [ ! -d "/var/lib/erigon/testnet/${config_dir}" ]; then
+    mkdir -p /var/lib/erigon/testnet
+    cd /var/lib/erigon/testnet
+    git init --initial-branch="${branch}"
+    git remote add origin "${repo}"
+    git config core.sparseCheckout true
+    echo "${config_dir}" > .git/info/sparse-checkout
+    git pull origin "${branch}"
+  fi
+  bootnodes="$(awk -F'- ' '!/^#/ && NF>1 {print $2}' "/var/lib/erigon/testnet/${config_dir}/enodes.yaml" | paste -sd ",")"
+  networkid="$(jq -r '.config.chainId' "/var/lib/erigon/testnet/${config_dir}/genesis.json")"
+  set +e
+  __network="--bootnodes=${bootnodes} --networkid=${networkid}"
+  if [ ! -d /var/lib/erigon/chaindata ]; then
+    erigon init --datadir /var/lib/erigon "/var/lib/erigon/testnet/${config_dir}/genesis.json"
+  fi
+else
+  __network="--chain ${NETWORK}"
+fi
 
 if [ "${ARCHIVE_NODE}" = "true" ]; then
   echo "Erigon archive node without pruning"
-  __prune=""
+  __prune="--prune.mode=archive --prune.distance=0"
+elif [ "${MINIMAL_NODE}" = "aggressive" ]; then
+  echo "Erigon minimal node with aggressive expiry"
+  __prune="--prune.mode=minimal --experiment.persist.receipts.v2=false"
+elif [ "${MINIMAL_NODE}" = "true" ]; then
+  case "${NETWORK}" in
+    mainnet | sepolia )
+      echo "Erigon minimal node with pre-merge history expiry"
+      __prune="--prune.mode=full --experiment.persist.receipts.v2=false"
+      ;;
+    * )
+      echo "There is no pre-merge history for ${NETWORK} network, Erigon will use \"full\" pruning."
+      __prune="--prune.mode=full --experiment.persist.receipts.v2=false"
+      ;;
+  esac
 else
-  if [[ "$*" =~ "--chain mainnet" ]]; then
-    echo "mainnet: Running with prune.r.before=11052984 for eth deposit contract"
-    __prune="--prune=htc --prune.r.before=11052984"
-  elif [[ "$*" =~ "--chain goerli" ]]; then
-    echo "goerli: Running with prune.r.before=4367322 for eth deposit contract"
-    __prune="--prune=htc --prune.r.before=4367322"
-  elif [[ "$*" =~ "--chain sepolia" ]]; then
-    echo "sepolia: Running with prune.r.before=1273020 for eth deposit contract"
-    __prune="--prune=htc --prune.r.before=1273020"
-  elif [[ "$*" =~ "--chain gnosis" ]]; then
-    echo "gnosis: Running with prune.r.before=19469077 for gno deposit contract"
-    __prune="--prune=htc --prune.r.before=19469077"
-  else
-    echo "Unable to determine eth deposit contract, running without prune.r.before"
-    __prune="--prune=htc"
+  echo "Erigon full node without history expiry"
+  __prune="--prune.mode=blocks"
+fi
+
+__caplin=""
+if [[ "${COMPOSE_FILE}" =~ (prysm\.yml|prysm-cl-only\.yml|lighthouse\.yml|lighthouse-cl-only\.yml|lodestar\.yml|\
+lodestar-cl-only\.yml|nimbus\.yml|nimbus-cl-only\.yml|nimbus-allin1\.yml|teku\.yml|teku-cl-only\.yml|\
+teku-allin1\.yml|grandine\.yml|grandine-cl-only\.yml|grandine-allin1\.yml) ]]; then
+  __caplin="--externalcl=true"
+else
+  echo "Running Erigon with internal Caplin consensus layer client"
+  __caplin="--caplin.discovery.addr=0.0.0.0 --caplin.discovery.port=${CL_P2P_PORT} --caplin.blobs-immediate-backfill=true"
+  __caplin+=" --caplin.discovery.tcpport=${CL_P2P_PORT} --caplin.validator-monitor=true"
+  __caplin+=" --caplin.max-peer-count=${CL_MAX_PEER_COUNT}"
+  __caplin+=" --beacon.api=beacon,builder,config,debug,events,node,validator,lighthouse"
+  __caplin+=" --beacon.api.addr=0.0.0.0 --beacon.api.port=${CL_REST_PORT} --beacon.api.cors.allow-origins=*"
+  if [ "${MEV_BOOST}" = "true" ]; then
+    __caplin+=" --caplin.mev-relay-url=${MEV_NODE}"
+    echo "MEV Boost enabled"
   fi
+  if [ "${ARCHIVE_NODE}" = "true" ]; then
+    __caplin+=" --caplin.states-archive=true --caplin.blobs-archive=true --caplin.blobs-no-pruning=true --caplin.blocks-archive=true"
+  fi
+  if [ -n "${CHECKPOINT_SYNC_URL}" ]; then
+    __caplin+=" --caplin.checkpoint-sync-url=${CHECKPOINT_SYNC_URL}/eth/v2/debug/beacon/states/finalized"
+    echo "Checkpoint sync enabled"
+  else
+    __caplin+=" --caplin.checkpoint-sync.disable=true"
+  fi
+  echo "Caplin parameters: ${__caplin}"
+fi
+
+if [ "${IPV6}" = "true" ]; then
+  echo "Configuring Erigon for discv5 for IPv6 advertisements"
+  __ipv6="--v5disc"
+else
+  __ipv6=""
 fi
 
 # Word splitting is desired for the command line parameters
 # shellcheck disable=SC2086
-exec "$@" ${__prune} ${EL_EXTRAS}
+exec "$@" ${__ipv6} ${__network} ${__prune} ${__caplin} ${EL_EXTRAS}

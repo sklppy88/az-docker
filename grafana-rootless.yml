@@ -1,5 +1,4 @@
 # Grafana for use with rootless docker. Omits node-exporter, cadvisor, promtail and Loki
-version: "3.9"
 x-logging: &logging
   logging:
     driver: json-file
@@ -14,30 +13,32 @@ services:
     build:
       context: ./prometheus
     image: prometheus:local
+    pull_policy: never
     volumes:
       - prom-data:/prometheus
       - /etc/localtime:/etc/localtime:ro
+      - ./prometheus/conf.d/:/etc/prometheus/conf.d/:ro
+      - ./prometheus/custom-prom.yml:/etc/prometheus/custom-prom.yml:ro
     environment:
       - CLIENT=${COMPOSE_FILE}
-    entrypoint: choose-config.sh
-    command: ["/bin/prometheus", "--storage.tsdb.path=/prometheus", "--web.console.libraries=/usr/share/prometheus/console_libraries", "--web.console.templates=/usr/share/prometheus/consoles"]
+    command:
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=40d
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
     <<: *logging
     depends_on:
       - blackbox-exporter
       - json-exporter
-      - cryptowat-exporter
       - ethereum-metrics-exporter
 
   ethereum-metrics-exporter:
     restart: "unless-stopped"
-    build:
-      context: ./eth-metrics
-    image: ethereum-metrics-exporter:local
-    environment:
-      - CLIENT=${COMPOSE_FILE}
+    image: samcm/ethereum-metrics-exporter:debian-latest
     entrypoint:
-      - docker-entrypoint.sh
       - /ethereum-metrics-exporter
+      - --consensus-url=http://consensus:${CL_REST_PORT:-5052}
+      - --execution-url=http://execution:${EL_RPC_PORT:-8545}
     <<: *logging
 
   blackbox-exporter:
@@ -61,25 +62,13 @@ services:
       - --config.file
       - /config/json.yml
 
-  cryptowat-exporter:
-    restart: "unless-stopped"
-    image: nbarrientos/cryptowat_exporter
-    volumes:
-      - /etc/localtime:/etc/localtime:ro
-    environment:
-      - CRYPTOWAT_EXCHANGES=kraken
-      - CRYPTOWAT_PAIRS=ethusd,ethchf
-      - CRYPTOWAT_CACHESECONDS=300
-      - TZ=Europe/Zurich
-    <<: *logging
-
   grafana:
     restart: "unless-stopped"
     build:
       context: ./grafana
     image: grafana:local
-    # Defaults to root user. The script adjusts permissions and switches to grafana user since 12/26/2022
-    # This can be changed after a must-have update has been deployed by most (all?) users - possibly late 2023.
+    pull_policy: never
+    user: grafana
     environment:
       - GF_SERVER_HTTP_PORT=${GRAFANA_PORT}
       - CLIENT=${COMPOSE_FILE}
@@ -89,7 +78,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       - prometheus
-    entrypoint: ["provision-dashboards.sh"]
+    entrypoint: ["provision.sh"]
     command: /run.sh
     <<: *logging
     labels:

@@ -1,4 +1,3 @@
-version: "3.9"
 x-logging: &logging
   logging:
     driver: json-file
@@ -11,8 +10,10 @@ x-build: &teku-build
   context: ./teku
   dockerfile: ${TEKU_DOCKERFILE}
   args:
-    - BUILD_TARGET=${TEKU_SRC_BUILD_TARGET}
-    - DOCKER_TAG=${TEKU_DOCKER_TAG}
+    - BUILD_TARGET=${TEKU_SRC_BUILD_TARGET:-'$(git describe --tags $(git rev-list --tags --max-count=1))'}
+    - SRC_REPO=${TEKU_SRC_REPO:-https://github.com/ConsenSys/teku}
+    - DOCKER_TAG=${TEKU_DOCKER_TAG:-latest}
+    - DOCKER_REPO=${TEKU_DOCKER_REPO:-consensys/teku}
 
 services:
   consensus:
@@ -20,6 +21,7 @@ services:
     build:
       <<: *teku-build
     image: teku:local
+    pull_policy: never
     user: teku
     stop_grace_period: 1m
     volumes:
@@ -27,35 +29,40 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - jwtsecret:/var/lib/teku/ee-secret
     environment:
-      - JAVA_OPTS=${TEKU_HEAP:--Xmx5g}
-      - RAPID_SYNC_URL=${RAPID_SYNC_URL}
+      - JAVA_OPTS=${TEKU_HEAP:--Xmx7g}
+      - CHECKPOINT_SYNC_URL=${CHECKPOINT_SYNC_URL}
       - JWT_SECRET=${JWT_SECRET}
       - MEV_BOOST=${MEV_BOOST}
       - MEV_NODE=${MEV_NODE}
       - BEACON_STATS_API=${BEACON_STATS_API}
       - BEACON_STATS_MACHINE=${BEACON_STATS_MACHINE}
       - CL_EXTRAS=${CL_EXTRAS:-}
+      - EMBEDDED_VC=false
       - VC_EXTRAS=
       - DOPPELGANGER=false
-      - ARCHIVE_NODE=${ARCHIVE_NODE:-}
-      - GRAFFITI=${GRAFFITI:-}
+      - ARCHIVE_NODE=${CL_ARCHIVE_NODE:-false}
+      - GRAFFITI=
       - DEFAULT_GRAFFITI=true
       - WEB3SIGNER=false
-      - EMBEDDED_VC=false
+      - NETWORK=${NETWORK}
+      - IPV6=${IPV6:-false}
+      - CL_IPV6_P2P_PORT=${CL_IPV6_P2P_PORT:-9090}
     ports:
-      - ${HOST_IP:-}${CL_P2P_PORT:-9000}:${CL_P2P_PORT:-9000}/tcp
-      - ${HOST_IP:-}${CL_P2P_PORT:-9000}:${CL_P2P_PORT:-9000}/udp
+      - ${HOST_IP:-}:${CL_P2P_PORT:-9000}:${CL_P2P_PORT:-9000}/tcp
+      - ${HOST_IP:-}:${CL_P2P_PORT:-9000}:${CL_P2P_PORT:-9000}/udp
+      - ${HOST_IP:-}:${CL_IPV6_P2P_PORT:-9090}:${CL_IPV6_P2P_PORT:-9090}/tcp
+      - ${HOST_IP:-}:${CL_IPV6_P2P_PORT:-9090}:${CL_IPV6_P2P_PORT:-9090}/udp
     networks:
       default:
         aliases:
           - eth2
+          - ${CL_ALIAS:-default-consensus}  # This allows multiple Eth Docker stacks all connected to the same bridge network
     <<: *logging
     entrypoint:
       - docker-entrypoint.sh
       - /opt/teku/bin/teku
       - --data-path=/var/lib/teku
       - --log-destination=CONSOLE
-      - --network=${NETWORK}
       - --ee-endpoint=${EL_NODE}
       - --ee-jwt-secret-file
       - /var/lib/teku/ee-secret/jwtsecret
@@ -75,16 +82,16 @@ services:
       - --metrics-host-allowlist=*
       - --validators-proposer-default-fee-recipient=${FEE_RECIPIENT}
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.${CL_HOST:-cl}.service=${CL_HOST:-cl}
-      - traefik.http.routers.${CL_HOST:-cl}.entrypoints=websecure
-      - traefik.http.routers.${CL_HOST:-cl}.rule=Host(`${CL_HOST:-cl}.${DOMAIN}`)
-      - traefik.http.routers.${CL_HOST:-cl}.tls.certresolver=letsencrypt
-      - traefik.http.routers.${CL_HOST:-cl}lb.service=${CL_HOST:-cl}
-      - traefik.http.routers.${CL_HOST:-cl}lb.entrypoints=websecure
-      - traefik.http.routers.${CL_HOST:-cl}lb.rule=Host(`${CL_LB:-cl-lb}.${DOMAIN}`)
-      - traefik.http.routers.${CL_HOST:-cl}lb.tls.certresolver=letsencrypt
-      - traefik.http.services.${CL_HOST:-cl}.loadbalancer.server.port=${CL_REST_PORT:-5052}
+      - metrics.scrape=true
+      - metrics.path=/metrics
+      - metrics.port=8008
+      - metrics.instance=consensus
+      - metrics.network=${NETWORK}
+
 volumes:
   tekuconsensus-data:
   jwtsecret:
+
+networks:
+  default:
+    enable_ipv6: ${IPV6:-false}

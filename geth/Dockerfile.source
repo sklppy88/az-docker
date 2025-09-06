@@ -1,17 +1,19 @@
 # Build Geth in a stock Go build container
-FROM golang:1.20-alpine as builder
+FROM golang:1.25-alpine AS builder
 
 # Unused, this is here to avoid build time complaints
 ARG DOCKER_TAG
+ARG DOCKER_REPO
 
 ARG BUILD_TARGET
+ARG SRC_REPO
 
 RUN apk update && apk add --no-cache make gcc musl-dev linux-headers git bash
 
 WORKDIR /src
-RUN bash -c "git clone https://github.com/ethereum/go-ethereum.git && cd go-ethereum && git config advice.detachedHead false && git fetch --all --tags && \
+RUN bash -c "git clone ${SRC_REPO} go-ethereum && cd go-ethereum && git config advice.detachedHead false && git fetch --all --tags && \
 if [[ ${BUILD_TARGET} =~ pr-.+ ]]; then git fetch origin pull/$(echo ${BUILD_TARGET} | cut -d '-' -f 2)/head:geth-pr; git checkout geth-pr; else git checkout ${BUILD_TARGET}; fi && \
-make all"
+go run build/ci.go install -static"
 
 # Pull all binaries into a second stage deploy container
 FROM alpine:3
@@ -21,7 +23,7 @@ ARG UID=10001
 # GID 10002 is deliberate so it can exchange secret with CL
 ARG GID=10002
 
-RUN apk add --no-cache ca-certificates tzdata bash su-exec
+RUN apk add --no-cache ca-certificates tzdata bash su-exec git git-lfs jq
 
 RUN addgroup \
     --gid "${GID}" \
@@ -36,7 +38,8 @@ RUN adduser \
     --ingroup "${USER}" \
     "${USER}"
 
-RUN mkdir -p /var/lib/goethereum/ee-secret && chown -R ${USER}:${USER} /var/lib/goethereum && chmod -R 700 /var/lib/goethereum && chmod 777 /var/lib/goethereum/ee-secret
+RUN mkdir -p /var/lib/goethereum && chown -R ${USER}:${USER} /var/lib/goethereum && chmod -R 700 /var/lib/goethereum
+RUN mkdir -p /var/lib/geth/ee-secret && chown -R ${USER}:${USER} /var/lib/geth && chmod -R 700 /var/lib/geth && chmod 777 /var/lib/geth/ee-secret
 
 # Cannot assume buildkit, hence no chmod
 COPY --from=builder --chown=${USER}:${USER} /src/go-ethereum/build/bin/geth /usr/local/bin/
