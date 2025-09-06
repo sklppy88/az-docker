@@ -1,6 +1,7 @@
 chain = "Mainnet"
 
 [pbs]
+host = "0.0.0.0"  # Required for Docker container networking
 port = 18550
 
 # Mainnet relay URLs
