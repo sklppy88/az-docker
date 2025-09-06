@@ -12,6 +12,8 @@ services:
     environment:
       CB_CONFIG: /cb-config.toml
       CB_METRICS_PORT: 10000
+    expose:
+      - "18550"  # PBS port for container-to-container communication
     volumes:
     - ./commit-boost/cb-config.toml:/cb-config.toml:ro
     networks:
