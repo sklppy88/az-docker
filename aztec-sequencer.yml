@@ -1,0 +1,59 @@
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: 100m
+      max-file: "3"
+      tag: '{{.ImageName}}|{{.Name}}|{{.ImageFullID}}|{{.FullID}}'
+
+services:
+  aztec-sequencer:
+    image: "aztecprotocol/aztec:latest"
+    restart: always
+    environment:
+      ARCHIVER_BATCH_SIZE: 3
+      DATA_DIRECTORY: /var/lib/data
+      LOG_LEVEL: ${LOG_LEVEL}
+      ETHEREUM_HOSTS: ${EL_NODE}
+      L1_CONSENSUS_HOST_URLS: ${CL_NODE}
+      P2P_IP: ${P2P_IP}
+      P2P_PORT: ${P2P_PORT}
+      AZTEC_PORT: ${AZTEC_PORT}
+      KEY_STORE_DIRECTORY: /var/lib/keystores
+    volumes:
+      - aztec-node-data:/var/lib/data
+      - ./.aztec/keystores:/var/lib/keystores
+    ports:
+      - ${AZTEC_PORT:-8080}:${AZTEC_PORT:-8080}
+      - ${P2P_PORT:-40400}:${P2P_PORT:-40400}
+      - ${P2P_PORT:-40400}:${P2P_PORT:-40400}/udp
+    networks:
+      default:
+        aliases:
+          - aztec-sequencer
+          # This allows multiple Eth Docker stacks all connected to the same bridge network
+          - ${AZTEC_SEQUENCER_ALIAS:-default-aztec-sequencer}
+    <<: *logging
+    entrypoint: >-
+      node
+      --no-warnings
+      /usr/src/yarn-project/aztec/dest/bin/index.js
+      start
+      --node
+      --archiver
+      --sequencer
+      --network testnet
+    # labels:
+    #   - metrics.scrape=true
+    #   - metrics.path=/metrics
+    #   - metrics.port=6060
+    #   - metrics.instance=execution
+    #   - metrics.network=${NETWORK}
+
+volumes:
+  aztec-node-data:
+  aztec-keystore-data:
+
+networks:
+  default:
+    enable_ipv6: ${IPV6:-false}

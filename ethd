@@ -3274,43 +3274,21 @@ terminate() {
 
 
 __query_network() {
-  __var="NETWORK"
+  __var="AZTEC_NETWORK"
   __get_value_from_env "${__var}" "${__env_file}" "__prev_network"
-  NETWORK=$(whiptail --notags --title "Select Network" --menu \
+  AZTEC_NETWORK=$(whiptail --notags --title "Aztec Node Wizard" --menu \
   "Which network do you want to run on?" 14 65 6 \
-  "hoodi" "Hoodi Testnet" \
-  "ephemery" "Ephemery Testnet" \
-  "mainnet" "Ethereum Mainnet" \
-  "gnosis" "Gnosis Chain" \
-  "sepolia" "Sepolia Testnet (permissioned validators)" \
-  "custom" "Custom Testnet (needs a URL)" 3>&1 1>&2 2>&3)
+  "testnet" "Testnet" 3>&1 1>&2 2>&3)
 
-  case "${NETWORK}" in
-    "mainnet")
-      echo "You chose to run on Ethereum mainnet"
-      ;;
-    "gnosis")
-      echo "You chose to run on Gnosis Chain"
-      ;;
-    "sepolia" | "hoodi" )
-      echo "You chose to run on ${NETWORK} testnet"
-      ;;
-    "custom" )
-      while true; do
-        NETWORK=$(whiptail --title "Configure testnet URL" --inputbox "What is github URL of your custom testnet \
-spec? (right-click to paste)" 10 60 3>&1 1>&2 2>&3)
-        if [[ ${NETWORK} =~ ^https?:// ]]; then
-          echo "Your custom testnet URL is: ${NETWORK}"
-          break
-        else
-          whiptail --msgbox "${NETWORK} is not a valid URL. You can try again or Cancel on the next \
-screen.\n\nCustom testnets only work with a URL to fetch their configuration from." 12 65
-        fi
-      done
+  case "${AZTEC_NETWORK}" in
+    "testnet")
+      NETWORK=sepolia
+      echo "You chose to run on: ${AZTEC_NETWORK}"
+      echo "This runs on: ${NETWORK}"
       ;;
   esac
 # shellcheck disable=SC2154
-  if [ ! "${NETWORK}" = "${__prev_network}" ]; then
+  if [ ! "${AZTEC_NETWORK}" = "${__prev_network}" ]; then
     __network_change=1
   else
     __network_change=0
@@ -3319,78 +3297,96 @@ screen.\n\nCustom testnets only work with a URL to fetch their configuration fro
 
 
 __query_deployment() {
-  if [ "${NETWORK}" = "gnosis" ]; then
-    if uname -m | grep -q riscv64; then
-      echo "Gnosis network has no available client combos on RISC-V. Aborting."
-      exit 1
-    fi
-    __deployment=$(whiptail --notags --title "Select deployment type" --menu \
-    "What kind of deployment do you want to run?" 11 65 3 \
-    "node" "Ethereum node - consensus, execution and validator client" \
-    "rpc" "Ethereum RPC node - consensus and execution client" \
-    "validator" "Validator client only" 3>&1 1>&2 2>&3)
-  elif [ "${NETWORK}" = "ephemery" ]; then
-    if uname -m | grep -q riscv64; then
-      echo "Ephemery network has no available client combos on RISC-V. Aborting."
-      exit 1
-    fi
-    __deployment=$(whiptail --notags --title "Select deployment type" --menu \
-    "What kind of deployment do you want to run?" 11 65 3 \
-    "node" "Ethereum node - consensus, execution and validator client" \
-    "rpc" "Ethereum RPC node - consensus and execution client" \
-    "validator" "Validator client only" 3>&1 1>&2 2>&3)
-  elif uname -m | grep -q aarch64 || uname -m | grep -q arm64; then
+  if uname -m | grep -q aarch64 || uname -m | grep -q arm64 || uname -m | grep -q x86_64; then
     __deployment=$(whiptail --notags --title "Select deployment type" --menu \
     "What kind of deployment do you want to run?" 12 65 4 \
-    "node" "Ethereum node - consensus, execution and validator client" \
-    "rpc" "Ethereum RPC node - consensus and execution client" \
-    "lido_comp" "Lido-compatible node (Community Staking / Simple DVT)" \
-    "rocket" "Validator client only - integrate with RocketPool" \
-    "ssv" "SSV node - consensus, execution and ssv-node" \
+    "full_node" "A full node" \
+    "sequencer_node" "A sequencer" \
+    "prover" "A prover (prover node, prover broker, and prover agents)" \
     3>&1 1>&2 2>&3)
   elif uname -m | grep -q riscv64; then
-    __deployment=$(whiptail --notags --title "Select deployment type" --menu \
-    "What kind of deployment do you want to run?" 11 65 3 \
-    "node" "Ethereum node - consensus, execution and validator client" \
-    "rpc" "Ethereum RPC node - consensus and execution client" \
-    "rocket" "Validator client only - integrate with RocketPool" 3>&1 1>&2 2>&3)
-  elif uname -m | grep -q x86_64; then
-    __deployment=$(whiptail --notags --title "Select deployment type" --menu \
-    "What kind of deployment do you want to run?" 13 65 5 \
-    "node" "Ethereum node - consensus, execution and validator client" \
-    "rpc" "Ethereum RPC node - consensus and execution client" \
-    "lido_comp" "Lido-compatible node (Community Staking / Simple DVT)" \
-    "rocket" "Validator client only - integrate with RocketPool" \
-    "ssv" "SSV node - consensus, execution and ssv-node" 3>&1 1>&2 2>&3)
+    echo "Aztec has no available client combos on RISC-V. Aborting."
+      exit 1
   else
-    echo "Eth Docker does not recognize this CPU architecture. Aborting."
+    echo "The wizard does not recognize this CPU architecture. Aborting."
     echo "Output of uname -m"
     uname -m
     exit 1
   fi
 
-  if [ "${__deployment}" = "lido_comp" ]; then
-    if uname -m | grep -q aarch64 || uname -m | grep -q arm64; then
-      __deployment=$(whiptail --notags --title "Select deployment type for Lido" --menu \
-      "What kind of deployment to participate in Lido protocol do you want to run?" 11 90 3 \
-      "lido_csm" "[Community Staking] CSM node - Consensus, execution and validator client" \
-      "lido_ssv" "[Simple DVT] SSV node - Consensus, execution and ssv-node" \
-      "lido_obol" "[Simple DVT] Obol node - Nodes, validator client and charon node (obol middleware)" 3>&1 1>&2 2>&3)
-    elif uname -m | grep -q x86_64; then
-      __deployment=$(whiptail --notags --title "Select deployment type for Lido" --menu \
-      "What kind of deployment to participate in Lido protocol do you want to run?" 11 90 3 \
-      "lido_csm" "[Community Staking] CSM node - Consensus, execution and validator client" \
-      "lido_ssv" "[Simple DVT] SSV node - Consensus, execution and ssv-node" \
-      "lido_obol" "[Simple DVT] Obol node - Nodes, validator client and charon node (obol middleware)" 3>&1 1>&2 2>&3)
-    else
-      echo "Eth Docker does not support Lido on this CPU architecture. Aborting."
-      echo "Output of uname -m"
-      uname -m
-      exit 1
-    fi
-  fi
-
   echo "Your deployment choice is: ${__deployment}"
+}
+
+__query_sequencer_config() {
+  while true; do
+    _aztec_sequencer_attester_private_keys=$(whiptail --title "Sequencer attester identities" --inputbox "Paste your sequencer private keys, comma separated (ETH private keys)" 10 60 3>&1 1>&2 2>&3)
+    break
+  done
+
+  while true; do
+    _aztec_sequencer_publisher_private_keys=$(whiptail --title "Sequencer publisher identities" --inputbox "Paste your sequencer publisher private keys, comma separated (ETH private keys) (will default to attester keys if unset)" 10 60 3>&1 1>&2 2>&3)
+    break
+  done
+
+  while true; do
+    _aztec_sequencer_coinbase_address=$(whiptail --title "Sequencer coinbase" --inputbox "Paste your sequencer coinbase address (ETH address) (will default to first attester address if unset)" 10 60 3>&1 1>&2 2>&3)
+    break
+  done
+
+  while true; do
+    _aztec_sequencer_fee_recipient_address=$(whiptail --title "Sequencer fee recipient" --inputbox "Paste your sequencer fee recipient address (Aztec address)" 10 60 3>&1 1>&2 2>&3)
+    break
+  done
+
+  echo "Your attester private keys are: ${_aztec_sequencer_attester_private_keys}"
+  echo "Your publisher private keys are: ${_aztec_sequencer_publisher_private_keys}"
+  echo "Your coinbase address is: ${_aztec_sequencer_coinbase_address}"
+  echo "Your fee recipient address is: ${_aztec_sequencer_fee_recipient_address}"
+}
+
+__query_prover_config() {
+  while true; do
+    _aztec_prover_publisher_private_key=$(whiptail --title "Prover publisher identity" --inputbox "Paste your prover publisher private key (ETH private key)" 10 60 3>&1 1>&2 2>&3)
+    break
+  done
+
+  while true; do
+    _aztec_prover_publisher_address=$(whiptail --title "Sequencer publisher identity p2" --inputbox "Paste your prover publisher address that corresponds to the private key inputted in the last step (ETH address)" 10 60 3>&1 1>&2 2>&3)
+    break
+  done
+
+  echo "Your attester private keys are: ${_aztec_prover_publisher_private_key}"
+  echo "Your publisher private keys are: ${_aztec_prover_publisher_address}"
+}
+
+__generate_keystore_with_jq() {
+  # This function expects the four variables to be set.
+  echo "Generating keystore.json using jq..."
+
+  # jq reads the variables and builds the JSON object.
+  # -n:           Create JSON from scratch, don't read from stdin.
+  # --arg <n> <v>: Pass a shell variable <v> as a string named <n> into jq.
+  # .attester = ($ak | split(",")): Take the 'ak' variable, split it by ',', creating a JSON array.
+  # if $pk != "" ...: This is the key to handling optional fields. The key is only added if the variable is not empty.
+  jq -n \
+    --arg ak "$_aztec_sequencer_attester_private_keys" \
+    --arg pk "$_aztec_sequencer_publisher_private_keys" \
+    --arg cb "$_aztec_sequencer_coinbase_address" \
+    --arg fr "$_aztec_sequencer_fee_recipient_address" \
+    '
+      # Start with an empty object for the validator
+      {}
+      # Add mandatory fields
+      | .attester = ($ak | split(","))
+      | .feeRecipient = $fr
+      # Conditionally add optional fields
+      | if $pk != "" then .publisher = ($pk | split(",")) else . end
+      | if $cb != "" then .coinbase = $cb else . end
+      # Wrap the validator object in the final schema structure
+      | { schemaVersion: 1, validators: [.] }
+    ' > "./.aztec/keystores/keystore_$(date '+%s').json"
+
+  echo "Successfully created keystore.json."
 }
 
 
@@ -3499,22 +3495,7 @@ __query_consensus_client() {
 
 
 __query_consensus_only_client() {
-  if [ "${NETWORK}" = "gnosis" ]; then
-    CONSENSUS_CLIENT=$(whiptail --notags --title "Select consensus client" --menu \
-    "Which consensus client do you want to run?" 13 65 5 \
-    "lighthouse-cl-only.yml" "Lighthouse (Rust) - consensus client" \
-    "teku-cl-only.yml" "Teku (Java) - consensus client" \
-    "lodestar-cl-only.yml" "Lodestar (TypeScript) - consensus client" \
-    "nimbus-cl-only.yml" "Nimbus (Nim) - consensus client" \
-    "caplin" "Caplin (Go) - Erigon's built-in CL" \
-    3>&1 1>&2 2>&3)
-  elif [ "${NETWORK}" = "ephemery" ]; then
-    CONSENSUS_CLIENT=$(whiptail --notags --title "Select consensus client" --menu \
-    "Which consensus client do you want to run?" 9 65 2 \
-    "teku-cl-only.yml" "Teku (Java) - consensus client" \
-    "lodestar-cl-only.yml" "Lodestar (TypeScript) - consensus client" \
-    3>&1 1>&2 2>&3)
-  elif uname -m | grep -q aarch64 || uname -m | grep -q arm64; then
+  if uname -m | grep -q aarch64 || uname -m | grep -q arm64; then
     CONSENSUS_CLIENT=$(whiptail --notags --title "Select consensus client" --menu \
     "Which consensus client do you want to run?" 13 65 7 \
     "nimbus-cl-only.yml" "Nimbus (Nim) - consensus client" \
@@ -3524,11 +3505,14 @@ __query_consensus_only_client() {
     "teku-cl-only.yml" "Teku (Java) - consensus client" \
     "prysm-cl-only.yml" "Prysm (Go) - consensus client" \
     "caplin" "Caplin (Go) - Erigon's built-in CL" \
+    "external" "Provide a consensus RPC url" \
     3>&1 1>&2 2>&3)
   elif uname -m | grep -q riscv64; then
     CONSENSUS_CLIENT=$(whiptail --notags --title "Select consensus client" --menu \
     "Which consensus client do you want to run?" 9 65 1 \
-    "nimbus-cl-only.yml" "Nimbus (Nim) - consensus client" 3>&1 1>&2 2>&3)
+    "nimbus-cl-only.yml" "Nimbus (Nim) - consensus client" \
+    "external" "Provide a consensus RPC url" \
+    3>&1 1>&2 2>&3)
   else
     CONSENSUS_CLIENT=$(whiptail --notags --title "Select consensus client" --menu \
     "Which consensus client do you want to run?" 14 65 7 \
@@ -3539,10 +3523,31 @@ __query_consensus_only_client() {
     "lodestar-cl-only.yml" "Lodestar (TypeScript) - consensus client" \
     "prysm-cl-only.yml" "Prysm (Go) - consensus client" \
     "caplin" "Caplin (Go) - Erigon's built-in CL" \
+    "external" "Provide a consensus RPC url" \
     3>&1 1>&2 2>&3)
   fi
 
-  echo "Your consensus client file is:" "${CONSENSUS_CLIENT}"
+  if [ "${CONSENSUS_CLIENT}" = "external" ]; then
+    while true; do
+      AZTEC_CL_ENDPOINT=$(whiptail --title "Configure consensus layer" --inputbox "What is the rpc URL ?" 10 60 3>&1 1>&2 2>&3)
+      if [[ ${AZTEC_CL_ENDPOINT} =~ ^https?:// ]]; then
+        echo "Your L1 consensus RPC URL is: ${AZTEC_CL_ENDPOINT}"
+        break
+      else
+        whiptail --msgbox "${AZTEC_CL_ENDPOINT} is not a valid URL. You can try again or Cancel on the next \
+screen.\n\nCustom testnets only work with a URL to fetch their configuration from." 12 65
+      fi
+    done
+
+    unset CONSENSUS_CLIENT
+    CL_NODE="${AZTEC_CL_ENDPOINT}"
+  elif [ "${CONSENSUS_CLIENT}" = "caplin" ]; then
+    echo "Your consensus client file is:" "${CONSENSUS_CLIENT}"
+    CL_NODE=http://execution:5052
+  else
+    echo "Your consensus client file is:" "${CONSENSUS_CLIENT}"
+    CL_NODE="http://consensus:5052"
+  fi
 }
 
 
@@ -3581,7 +3586,7 @@ again or Cancel on the next screen." 10 65
 
 
 __query_execution_client() {
-  if [ "${CONSENSUS_CLIENT}" = "caplin" ]; then
+  if [ "${CONSENSUS_CLIENT:-}" = "caplin" ]; then
     EXECUTION_CLIENT="erigon.yml"
     echo "Your execution client file is:" "${EXECUTION_CLIENT}"
 # This gets used, but shellcheck doesn't recognize that
@@ -3594,17 +3599,7 @@ __query_execution_client() {
   __choices=()
   __arch=$(uname -m)
 
-  if [ "${NETWORK}" = "gnosis" ]; then
-    __choices+=("nethermind.yml" "Nethermind (.NET)")
-    __choices+=("erigon.yml" "Erigon (Go)")
-  elif [[ "${NETWORK}" = "ephemery" ]]; then
-    if [[ "${__arch}" != *"riscv64"* ]]; then
-      __choices+=("besu.yml" "Besu (Java)")
-    else
-      echo "Epheremy testnet is not supported on ${__arch}"
-      exit 1
-    fi
-  elif [[ "${__arch}" =~ (aarch64|arm64) ]] ; then
+  if [[ "${__arch}" =~ (aarch64|arm64) ]] ; then
     __choices+=("besu.yml" "Besu (Java)")
     __choices+=("nethermind.yml" "Nethermind (.NET)")
     __choices+=("erigon.yml" "Erigon (Go)")
@@ -3623,7 +3618,7 @@ __query_execution_client() {
     __choices+=("nimbus-el.yml" "Nimbus (Nim) - alpha")
   fi
 
-  __choices+=("NONE" "Custom - Distributed")
+  __choices+=("external" "Provide an execution RPC url")
   __num_items=$(( ${#__choices[@]} / 2 ))
   __menu_height=$(( 8 + __num_items ))
 
@@ -3631,10 +3626,20 @@ __query_execution_client() {
   "Which execution client do you want to run?" "${__menu_height}" 65 "${__num_items}" \
   "${__choices[@]}" 3>&1 1>&2 2>&3)
 
-  if [ "${EXECUTION_CLIENT}" = "NONE" ]; then
+  if [ "${EXECUTION_CLIENT}" = "external" ]; then
+    while true; do
+      AZTEC_EL_ENDPOINT=$(whiptail --title "Configure execution layer" --inputbox "What is the rpc URL ?" 10 60 3>&1 1>&2 2>&3)
+      if [[ ${AZTEC_EL_ENDPOINT} =~ ^https?:// ]]; then
+        echo "Your L1 execution RPC URL is: ${AZTEC_EL_ENDPOINT}"
+        break
+      else
+        whiptail --msgbox "${AZTEC_EL_ENDPOINT} is not a valid URL. You can try again or Cancel on the next \
+screen.\n\nCustom testnets only work with a URL to fetch their configuration from." 12 65
+      fi
+    done
+
     unset EXECUTION_CLIENT
-    __query_custom_execution_client
-    EL_NODE="${EL_CUSTOM_NODE}"
+    EL_NODE="${AZTEC_EL_ENDPOINT}"
   else
     echo "Your execution client file is:" "${EXECUTION_CLIENT}"
 # This gets used, but shellcheck doesn't recognize that
@@ -4278,293 +4283,82 @@ config() {
   __check_legacy
   __query_network
   __query_deployment
-  case "${__deployment}" in
-    "node" | "lido_csm")
-      __query_consensus_client
-      ;;
-    "lido_obol")
-      __query_consensus_client
-      ;;
-    "validator" | "rocket")
-      __query_validator_client
-      ;;
-    "ssv" | "lido_ssv")
-      if [ "${NETWORK}" = "hoodi" ]; then
-        sed -i'.original' 's/  Network: .*/  Network: hoodi/' ssv-config/config.yaml
-      elif [ "${NETWORK}" = "mainnet" ]; then
-        sed -i'.original' 's/  Network: .*/  Network: mainnet/' ssv-config/config.yaml
-      else
-        echo "${NETWORK} is not something that works with SSV."
-        echo "Please choose Hoodi or Mainnet when running $__me config again"
-        echo "Aborting."
-        exit 1
-      fi
-      rm ssv-config/config.yaml.original
-      __query_ssv_client
-      if [ ! -f "./ssv-config/password.pass" ]; then
-        echo "Creating password file for encrypted SSV secret key"
-        head -c 16 /dev/urandom | base64 | tr -d '[:space:]' >./ssv-config/password.pass
-        ${__auto_sudo} chown 12000:12000 ./ssv-config/password.pass
-        ${__auto_sudo} chmod 600 ./ssv-config/password.pass
-      fi
-      if [ ! -f "./ssv-config/encrypted_private_key.json" ]; then
-        echo "Creating encrypted operator private key"
-        case "${SSV_CLIENT}" in
-          ssv.yml )
-            __dodocker run --name ssv-node-key-generation -v "$(pwd)/ssv-config/password.pass":/password.pass \
-              ssvlabs/ssv-node:latest /go/bin/ssvnode generate-operator-keys --password-file=/password.pass && \
-            __dodocker cp ssv-node-key-generation:/encrypted_private_key.json ./ssv-config/encrypted_private_key.json && \
-            __dodocker rm ssv-node-key-generation
-            ;;
-          anchor.yml )
-            __dodocker run --name anchor-key-generation -v "$(pwd)/ssv-config/password.pass":/password.pass \
-              sigp/anchor:latest keygen --password-file=/password.pass --encrypt && \
-            __dodocker cp anchor-key-generation:/encrypted_private_key.json ./ssv-config/encrypted_private_key.json && \
-            __dodocker rm anchor-key-generation
-            ;;
-          * )
-            echo "Unknown SSV client \"${SSV_CLIENT}\". This is a bug."
-            exit 70
-            ;;
-        esac
-        ${__auto_sudo} chown 12000:12000 ./ssv-config/encrypted_private_key.json
-      fi
-      __query_dkg
-      __query_consensus_only_client
-      ;;
-    "rpc")
-      __query_consensus_only_client
-      ;;
-    *)
-      echo "Unknown deployment ${__deployment}, this is a bug."
-      exit 70
-      ;;
-  esac
+
+  if [ "${__deployment}" = "sequencer_node" ]; then
+    __query_sequencer_config
+    __generate_keystore_with_jq
+  elif [ "${__deployment}" = "prover" ]; then
+    __query_prover_config
+    AZTEC_PROVER_PUBLISHER_PRIVATE_KEY=${_aztec_prover_publisher_private_key}
+    AZTEC_PROVER_PUBLISHER_ADDRESS=${_aztec_prover_publisher_address}
+  fi
+
+  __query_consensus_only_client
 
   MEV_BOOST=false
-# I do mean to match literally
-# shellcheck disable=SC2076
-  if [[ ! "${__deployment}" =~ ^(validator|rocket)$  ]]; then
-    if [ "${CONSENSUS_CLIENT}" = "caplin" ]; then
-      CL_NODE=http://execution:5052
-      __query_execution_client
-      if [[ ! "${__deployment}" =~ ^(ssv|lido_ssv|rpc)$  ]]; then
-        __query_validator_client  # This sets CONSENSUS_CLIENT
-      fi
+  __query_execution_client
+
+  if [[ -n "${EXECUTION_CLIENT+x}" && "${NETWORK}" =~ (mainnet|sepolia) ]]; then
+    if [[ "${__deployment}" = "rpc" ]]; then
+      __query_4444 --defaultno
     else
-      CL_NODE="http://consensus:5052"
-      __query_execution_client
+      __query_4444 ""
     fi
-
-    if [[ -n "${EXECUTION_CLIENT+x}" && "${NETWORK}" =~ (mainnet|sepolia) ]]; then
-      if [[ "${__deployment}" = "rpc" ]]; then
-        __query_4444 --defaultno
-      else
-        __query_4444 ""
-      fi
-    else  # On all other networks, disable
+  else  # On all other networks, disable
 #shellcheck disable=SC2034
-      EL_MINIMAL_NODE=false
-    fi
-
-    __query_checkpoint_sync
-    __query_mev
-    __query_grafana
-    __query_coinbase
-    if [[ "${__deployment}" = "node" || "${__deployment}" = "lido_csm" ]]; then
-      __query_graffiti
-    fi
-    if [ "${__deployment}" = "lido_csm" ]; then
-      if (whiptail --title "Keys generation" --yesno "Do you want to generate validator keys?" 10 60) then
-        __query_lido_keys_generation
-      else
-        __lido_keys_attention_message
-      fi
-      if [ "${NETWORK}" = "hoodi" ]; then
-        __link="https://csm.testnet.fi/?ref=ethdocker"
-      else
-        __link="https://csm.lido.fi/?ref=ethdocker"
-      fi
-      whiptail --title "Finish" --msgbox "Final steps!\n\n1. Run your node './ethd start'\n\n2. Wait until your node is fully synchronized\n\n4. Open ${__link} to submit your keys with '.eth/validator_keys/deposit-data-*.json' file content\n\n5. Wait for keys validation\n\n6. Import your keys by './ethd keys import'" 19 85
-    fi
-  else
-    unset EXECUTION_CLIENT
-    unset GRAFANA_CLIENT
-
-    __query_remote_beacon
-# This gets used, but shellcheck doesn't recognize that
-# shellcheck disable=SC2034
-    CL_NODE="${REMOTE_BEACON}"
-    __query_mev
-    __query_coinbase
-    __query_graffiti
+    EL_MINIMAL_NODE=false
   fi
+
+  __query_checkpoint_sync
+  __query_grafana
 
   __during_config=0
-
-  if [ "${__deployment}" = "lido_obol" ]; then
-    CL_NODE="http://charon:3600"
-    case "${NETWORK}" in  # Lido Locator, and oracle allowlist for exits
-      "mainnet")
-# We are using the variable
-# shellcheck disable=SC2034
-        VE_LOCATOR_ADDRESS="0xC1d0b3DE6792Bf6b4b37EccdcC24e45978Cfd2Eb"
-# We are using the variable
-# shellcheck disable=SC2034
-        VE_ORACLE_ADDRESSES_ALLOWLIST='["0x73181107c8D9ED4ce0bbeF7A0b4ccf3320C41d12","0x285f8537e1dAeEdaf617e96C742F2Cf36d63CcfB","0x404335BcE530400a5814375E7Ec1FB55fAff3eA2","0x946D3b081ed19173dC83Cd974fC69e1e760B7d78","0x007DE4a5F7bc37E2F26c0cb2E8A95006EE9B89b5","0xc79F702202E3A6B0B6310B537E786B9ACAA19BAf","0x61c91ECd902EB56e314bB2D5c5C07785444Ea1c8","0xe57B3792aDCc5da47EF4fF588883F0ee0c9835C9","0x4118DAD7f348A4063bD15786c299De2f3B1333F3"]'
-# We are using the variable
-# shellcheck disable=SC2034
-        VE_STAKING_MODULE_ID="2"
-# We are using the variable
-# shellcheck disable=SC2034
-        LIDO_DV_EXIT_EXIT_EPOCH="194048" # capella
-        ;;
-      "hoodi")
-# We are using the variable
-# shellcheck disable=SC2034
-        VE_LOCATOR_ADDRESS="0xe2EF9536DAAAEBFf5b1c130957AB3E80056b06D8"
-# We are using the variable
-# shellcheck disable=SC2034
-        VE_ORACLE_ADDRESSES_ALLOWLIST='["0xcA80ee7313A315879f326105134F938676Cfd7a9","0xf03B8DC8762B97F13Ac82e6F94bE3Ed002FF7459","0x1932f53B1457a5987791a40Ba91f71c5Efd5788F","0xf7aE520e99ed3C41180B5E12681d31Aa7302E4e5","0x99B2B75F490fFC9A29E4E1f5987BE8e30E690aDF","0x219743f1911d84B32599BdC2Df21fC8Dba6F81a2","0xD3b1e36A372Ca250eefF61f90E833Ca070559970","0x4c75FA734a39f3a21C57e583c1c29942F021C6B7","0x948A62cc0414979dc7aa9364BA5b96ECb29f8736","0xfe43A8B0b481Ae9fB1862d31826532047d2d538c","0x43C45C2455C49eed320F463fF4f1Ece3D2BF5aE2"]'
-# We are using the variable
-# shellcheck disable=SC2034
-        VE_STAKING_MODULE_ID="2"
-# We are using the variable
-# shellcheck disable=SC2034
-        LIDO_DV_EXIT_EXIT_EPOCH="256" # capella
-        ;;
-      *)
-        ;;
-    esac
-
-    if [ -f "./.eth/cluster-lock.json" ]; then
-      if (whiptail --title "Lido Obol cluster exists" --yesno "Your cluster has already been created. Continue with it?" 10 60); then
-# shellcheck disable=SC2086
-        __cluster_lock_is_valid=$(__docompose -f ./lido-obol.yml run --rm -v "$(pwd)"/.eth/cluster-lock.json:/cluster-lock.json:ro curl-jq sh -c \
-          "cat /cluster-lock.json | jq -r 'all(.cluster_definition.validators[]; (.fee_recipient_address | ascii_downcase) == (\"'${FEE_RECIPIENT}'\" | ascii_downcase) and (.withdrawal_address | ascii_downcase) == (\"'$(__lido_withdrawal_credentials_address)'\" | ascii_downcase))'" | tail -n 1)
-        if [[ "${__cluster_lock_is_valid}" =~ "true" ]]; then
-          echo "Your cluster lock is valid."
-        else
-          whiptail --title "Lido Obol cluster definition" --msgbox "Your cluster lock file './.eth/cluster-lock.json' is not valid.\n\nCheck that every validator has \`fee_recipient_address\` and \`withdrawal_address\` equal to Lido contracts and try again.\n\nLido fee recipient: '${FEE_RECIPIENT}'\nLido withdrawal credentials: '$(__lido_withdrawal_credentials_address)'" 14 90
-          echo "Your cluster lock is NOT valid."
-          exit 1
-        fi
-      elif (whiptail --title "Lido Obol cluster creation" --yesno "Backup a previously created cluster to create a new one?" 10 80); then
-        ${__as_owner} cp -vr ./.eth ./.eth_backup_"$EPOCHSECONDS"
-        ${__as_owner} rm -rf ./.eth
-        __query_lido_obol_enr
-        __query_lido_obol_cluster_definition
-        __query_lido_obol_cluster_dkg
-      else
-        whiptail --title "Lido Obol cluster creation" --msgbox "The \`.eth\` folder must be empty or non-existent to continue" 10 80
-        echo "The \`.eth\` folder must be empty to create a new cluster"
-        exit 1
-      fi
-    else
-      if [ -f "./.eth/charon-enr-private-key" ] && [ -f "./.eth/charon-enr-public-key" ]; then
-        if (whiptail --title "Lido Obol operator ENR creation" --yesno "You already have ENR. Use it?" 8 50); then
-          echo "Use existing ENR"
-        else
-          ${__as_owner} cp -vr ./.eth ./.eth_backup_"$EPOCHSECONDS"
-          ${__as_owner} rm -rf ./.eth
-          __query_lido_obol_enr
-        fi
-      else
-        __query_lido_obol_enr
-      fi
-
-      if [ -f "./.eth/cluster-definition.json" ]; then
-        if (whiptail --title "Lido Obol cluster creation in process" --yesno "You already have cluster definition. Use it?" 10 60); then
-# shellcheck disable=SC2086
-          __cluster_definition_is_valid=$(__docompose -f ./lido-obol.yml run --rm -v "$(pwd)"/.eth/cluster-definition.json:/cluster-definition.json:ro curl-jq sh -c \
-            "cat /cluster-definition.json | jq -r 'all(.validators[]; (.fee_recipient_address | ascii_downcase) == (\"'${FEE_RECIPIENT}'\" | ascii_downcase) and (.withdrawal_address | ascii_downcase) == (\"'$(__lido_withdrawal_credentials_address)'\" | ascii_downcase))'" | tail -n 1)
-          if [ "${__cluster_definition_is_valid}" = "true" ]; then
-            echo "Your cluster definition is valid."
-          else
-            whiptail --title "Lido Obol cluster creation" --msgbox "Your cluster definition is not valid.\n\nCheck that every validator has \`fee_recipient_address\` and \`withdrawal_address\` equal to Lido contracts and try again.\n\nLido fee recipient: '${FEE_RECIPIENT}'\nLido withdrawal credentials: '$(__lido_withdrawal_credentials_address)'" 14 90
-            echo "Your cluster definition is NOT valid."
-            exit 1
-          fi
-        else
-          __query_lido_obol_cluster_definition
-        fi
-      else
-        __query_lido_obol_cluster_definition
-      fi
-      __query_lido_obol_cluster_dkg
-    fi
-
-# We are using the variable
-# shellcheck disable=SC2034
-    VE_OPERATOR_ID=$(whiptail --title "Lido Operator ID" --inputbox "Put your Operator ID from Lido Operators dashboard \
-(right-click to paste)" 10 60 3>&1 1>&2 2>&3)
-    __obol_prom_remote_token=$(whiptail --title "Obol Prometheus" --inputbox "Put Obol Prometheus remote write token \
-(right-click to paste)" 10 60 3>&1 1>&2 2>&3)
-    cat ./prometheus/obol-prom.yml.sample > ./prometheus/custom-prom.yml
-    sed -i'.original' "s|      credentials: <PROM_REMOTE_WRITE_TOKEN>|      credentials: ${__obol_prom_remote_token}|" ./prometheus/custom-prom.yml
-    rm -f ./prometheus/custom-prom.yml.original
-    OBOL_CHARON_REMOTE_LOKI_ADDRESSES=$(whiptail --title "Obol Loki" --inputbox "Put Obol Loki remote URL \
-(right-click to paste)" 10 60 3>&1 1>&2 2>&3)
-    if [ -n "${OBOL_CHARON_REMOTE_LOKI_ADDRESSES}" ]; then
-      OBOL_CLUSTER_NAME=$(whiptail --title "Obol cluster name" --inputbox "Put your Obol cluster name \
-(right-click to paste)" 10 60 "Eth Docker" 3>&1 1>&2 2>&3)
-      OBOL_CLUSTER_PEER=$(whiptail --title "Obol cluster peer" --inputbox "Put your Obol cluster peer \
-(right-click to paste)" 10 60 "eth-docker" 3>&1 1>&2 2>&3)
-    else
-# This gets used, but shellcheck doesn't recognize that
-# shellcheck disable=SC2034
-      OBOL_CLUSTER_NAME=""
-# This gets used, but shellcheck doesn't recognize that
-# shellcheck disable=SC2034
-      OBOL_CLUSTER_PEER=""
-      echo "Obol Loki remote URL is empty, skipping"
-    fi
-  fi
-
-  if [ "${CONSENSUS_CLIENT}" = "caplin" ]; then
+  if [ "${CONSENSUS_CLIENT:-}" = "caplin" ]; then
     COMPOSE_FILE="${EXECUTION_CLIENT}:caplin-ports.yml"
   else
-    COMPOSE_FILE="${CONSENSUS_CLIENT}"
+    if [ -n "${CONSENSUS_CLIENT+x}" ]; then
+      COMPOSE_FILE="${CONSENSUS_CLIENT}"
+    fi
     if [ -n "${EXECUTION_CLIENT+x}" ]; then
       COMPOSE_FILE="${COMPOSE_FILE}:${EXECUTION_CLIENT}"
     fi
   fi
-  if [[ "${__deployment}" = "ssv" || "${__deployment}" = "lido_ssv" ]]; then
-    COMPOSE_FILE="${COMPOSE_FILE}:${SSV_CLIENT}"
-    if [[ -n "${__ssv_operator_id}" && ! "${__ssv_operator_id}" = "-1" ]]; then
-      COMPOSE_FILE="${COMPOSE_FILE}:ssv-dkg.yml"
-    fi
-  fi
+
   if [ -n "${GRAFANA_CLIENT+x}" ]; then
     COMPOSE_FILE="${COMPOSE_FILE}:${GRAFANA_CLIENT}"
   fi
-  if [ "${MEV_BOOST}" = "true" ] && [ ! "${__deployment}" = "rocket" ]; then
-    COMPOSE_FILE="${COMPOSE_FILE}:mev-boost.yml"
-  fi
-  if [ "${__deployment}" = "lido_obol" ]; then
-    COMPOSE_FILE="${COMPOSE_FILE}:lido-obol.yml"
-    if [ -n "${OBOL_CHARON_REMOTE_LOKI_ADDRESSES}" ]; then
-      COMPOSE_FILE="${COMPOSE_FILE}:lido-obol-promtail.yml"
+
+  if [ "${__deployment}" = "full_node" ]; then
+    if [ -z "${COMPOSE_FILE:-}" ]; then
+      COMPOSE_FILE="aztec-full.yml"
+    else
+      COMPOSE_FILE="${COMPOSE_FILE}:aztec-full.yml"
+    fi
+  elif [ "${__deployment}" = "sequencer_node" ]; then
+    if [ -z "${COMPOSE_FILE:-}" ]; then
+      COMPOSE_FILE="aztec-sequencer.yml"
+    else
+      COMPOSE_FILE="${COMPOSE_FILE}:aztec-sequencer.yml"
+    fi
+  elif [ "${__deployment}" = "prover" ]; then
+    if [ -z "${COMPOSE_FILE:-}" ]; then
+      COMPOSE_FILE="aztec-prover.yml"
+    else
+      COMPOSE_FILE="${COMPOSE_FILE}:aztec-prover.yml"
     fi
   fi
-  if { [ "${__deployment}" = "node" ] || [ "${__deployment}" = "rocket" ]; } \
-  && [ "${NETWORK}" = "hoodi" ]; then
-    COMPOSE_FILE="${COMPOSE_FILE}:deposit-cli.yml"
-  fi
-  if [ "${__deployment}" = "lido_csm" ]; then
-    COMPOSE_FILE="${COMPOSE_FILE}:deposit-cli.yml"
-  fi
-# Not multi-arch, this would break on ARM64
 
-#    COMPOSE_FILE="${COMPOSE_FILE}:ethdo.yml"
-  if [ "${__deployment}" = "rocket" ]; then
-    COMPOSE_FILE="${COMPOSE_FILE}:ext-network.yml"
-# This gets used, but shellcheck doesn't recognize that
-# shellcheck disable=SC2034
-    DOCKER_EXT_NETWORK="rocketpool_net"
-  fi
+  P2P_IP=$(curl -s https://api.ipify.org)
 
   echo "Your COMPOSE_FILE is:" "${COMPOSE_FILE}"
+
+  __var=AZTEC_PROVER_PUBLISHER_PRIVATE_KEY
+  __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
+  __var=AZTEC_PROVER_PUBLISHER_ADDRESS
+  __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
+
+  __var=P2P_IP
+  __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
 
   __var=FEE_RECIPIENT
   __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
@@ -4584,18 +4378,6 @@ config() {
   __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
   __var=NETWORK
   __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
-  if [[ ${NETWORK} =~ ^https?:// ]]; then  # The aliases need to not use ${NETWORK}
-    __var=W3S_ALIAS
-    __update_value_in_env "${__var}" "custom-web3signer" "${__env_file}"
-    __var=PG_ALIAS
-    __update_value_in_env "${__var}" "custom-postgres" "${__env_file}"
-    __var=CL_ALIAS
-    __update_value_in_env "${__var}" "custom-consensus" "${__env_file}"
-    __var=EL_ALIAS
-    __update_value_in_env "${__var}" "custom-execution" "${__env_file}"
-    __var=MEV_ALIAS
-    __update_value_in_env "${__var}" "custom-mev" "${__env_file}"
-  fi
   __var=MEV_BOOST
   __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
   __var=MEV_RELAYS
@@ -4604,36 +4386,6 @@ config() {
   __update_value_in_env "${__var}" "${!__var-false}" "${__env_file}"
   __var=DOCKER_EXT_NETWORK
   __update_value_in_env "${__var}" "${!__var:-"rocketpool_net"}" "${__env_file}"
-  if [ "${__deployment}" = "lido_obol" ]; then
-    __var=LIDO_DV_EXIT_EXIT_EPOCH
-    __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
-    __var=VE_OPERATOR_ID
-    __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
-    __var=VE_LOCATOR_ADDRESS
-    __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
-    __var=VE_ORACLE_ADDRESSES_ALLOWLIST
-    __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
-    __var=VE_STAKING_MODULE_ID
-    __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
-    __var=OBOL_CHARON_REMOTE_LOKI_ADDRESSES
-    __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
-    __var=OBOL_CLUSTER_NAME
-    __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
-    __var=OBOL_CLUSTER_PEER
-    __update_value_in_env "${__var}" "${!__var-}" "${__env_file}"
-# We are using the variable
-# shellcheck disable=SC2034
-    ENABLE_DIST_ATTESTATION_AGGR="true"
-    __var=ENABLE_DIST_ATTESTATION_AGGR
-    __update_value_in_env "${__var}" "${!__var}" "${__env_file}"
-  fi
-  if [[ "${NETWORK}" = "gnosis" ]] && [[ "${CONSENSUS_CLIENT}" =~ "nimbus" ]] ; then
-# We are using the variable
-# shellcheck disable=SC2034
-    NIM_DOCKERFILE=Dockerfile.sourcegnosis
-    __var=NIM_DOCKERFILE
-    __update_value_in_env "${__var}" "${!__var}" "${__env_file}"
-  fi
   if uname -m | grep -q riscv64; then
 # We are using the variable
 # shellcheck disable=SC2034
